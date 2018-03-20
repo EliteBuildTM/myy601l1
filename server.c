@@ -48,23 +48,24 @@ KISSDB *db = NULL;
 
 
 //Definition of global variables
-
-
 Node Req_Queue[SIZE_OF_QUEUE];
-//clean the memory of the Req_Queue
-memset(Req_Queue,0,sizeof(Node));
 
 //head and tail Initialized at the first position of the queue
 int head=0;
 int tail=0;
-//queue_mutex => to use with Req_Queue and head,tail
-static pthread_mutex_t queue_mutex=PTHREAD_MUTEX_INITIALIZER;
+//Initialize conditions for the signals
+pthread_cond_t not_full=PTHREAD_COND_INITIALIZER;
+pthread_cond_t not_empty =PTHREAD_COND_INITIALIZER;
+//queue_mutex => to use with Req_Queue,head,tail and signals conditions
+pthread_mutex_t queue_mutex=PTHREAD_MUTEX_INITIALIZER;
 
 struct timeval total_waiting_time;
 struct timeval total_service_time;
 int complete_requests;
 //time_mutex => to use with time counters and complete_requests
-static pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
+
+
 
 /*
 @check_tail_bounds- Checks if tail's position is out o bounds
@@ -86,6 +87,16 @@ void check_head_bounds(){
     pthread_mutex_unlock(&queue_mutex);
   }
 }
+void calculate_waiting_time(long secs,long usecs){
+  struct timeval waiting_time;
+  pthread_mutex_lock(&time_mutex);
+  gettimeofday(&waiting_time,NULL);
+  //Locking and calculating waiting time for the request
+  total_waiting_time.tv_sec=(waiting_time.tv_sec)-(secs);
+  total_waiting_time.tv_usec=(waiting_time.tv_usec)-(usecs);
+  pthread_mutex_unlock(&time_mutex);
+}
+
 /*
 @put_queue- Producer uses this to put new requests in the queue
 */
@@ -101,23 +112,18 @@ void put_request(int fd){
 /*
 @get_request -Consumer Threads use this to get requests from queue
 --All Threads must start their excecution with this function
---This function calls the process_request function
+--This function returns the socket_fd to process_request function
 */
-void get_request(){
-  struct timeval waiting_time;
+int get_request(){
+  int request_fd;
   pthread_mutex_lock(&queue_mutex);
-  gettimeofday(&waiting_time,NULL);
-  pthread_mutex_lock(&time_mutex);
-  //Locking and calculating waiting time for the request
-  total_waiting_time.tv_sec=(waiting_time.tv_sec)-(Req_Queue[head].start_time.tv_sec);
-  total_waiting_time.tv_usec=(waiting_time.tv_usec)-(Req_Queue[head].start_time.utv_sec);
-  pthread_mutex_unlock(&time_mutex);
-  //Calling process_request
-  process_request(Req_Queue[head].fd);
+  //Calling calculate_waiting_time
+  calculate_waiting_time(Req_Queue[head].start_time.tv_sec,Req_Queue[head].start_time.utv_sec);
+  request_fd=Req_Queue[head].fd;
   head++;
   check_head_bounds();
   pthread_mutex_unlock(&queue_mutex);
-
+  return request_fd;
 }
 
 /*
@@ -246,7 +252,28 @@ void process_request(const int socket_fd) {
     sprintf(response_str, "FORMAT ERROR\n");
     write_str_to_socket(socket_fd, response_str, strlen(response_str));
 }
-
+/*
+@ thread_start =>is the startup point for the Threads
+--Excecutes get_request and process_request
+--Pass NULL as argument
+*/
+void * thread_start (*void argument){
+  int req_fd;
+  while(1){
+    pthread_mutex_lock(&queue_mutex);
+    while(is_Empty()){
+      //should check for return value of wait
+      pthread_cond_wait(&not_empty,&queue_mutex);
+    }
+    //gets the request's descriptor to call process_request
+    req_fd=get_request();
+    //Send this signal to the Producer thread in case it waits
+    pthread_cond_signal(&not_full);
+    pthread_mutex_unlock(&queue_mutex);
+    //call process_request to serve the request
+    process_request(req_fd);
+  }
+}
 /*
  * @name main - The main routine.
  *
@@ -295,6 +322,12 @@ int main() {
     return 1;
   }
 
+  /*---------------------------------------------------------
+    ADD CODE FOR THREAD POOL HERE (EXW ARXISEI AMOLAW KAI GW)
+
+    --use thread_start for the function argument
+  ----------------------------------------------------------*/
+
   // main loop: wait for new connection/requests
   while (1) {
     // wait for incomming connection
@@ -304,9 +337,19 @@ int main() {
 
     // got connection, serve request
     fprintf(stderr, "(Info) main: Got connection from '%s'\n", inet_ntoa(client_addr.sin_addr));
-
-    process_request(new_fd);
+    pthread_mutex_lock(&queue_mutex);
+    while(is_Full()){
+      //if the queue is Full with requests then it waits for the signal from the consumer
+      //should check for the returning value of wait
+      pthread_cond_wait(&not_full,&queue_mutex);
+    }
+    //adds a request in the queue
+    put_request(new_fd);
+    //send signal to the consumers that the queue is not empty
+    //should check for the returning value of signal
+    pthread_cond_signal(&not_empty);
     close(new_fd);
+    pthread_mutex_unlock(&queue_mutex);
   }
 
   // Destroy the database.
