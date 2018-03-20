@@ -1,8 +1,8 @@
 /* server.c
 
-   Sample code of 
+   Sample code of
    Assignment L1: Simple multi-threaded key-value server
-   for the course MYY601 Operating Systems, University of Ioannina 
+   for the course MYY601 Operating Systems, University of Ioannina
 
    (c) S. Anastasiadis, G. Kappes 2016
 
@@ -10,6 +10,7 @@
 
 
 #include <signal.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include "utils.h"
 #include "kissdb.h"
@@ -20,22 +21,127 @@
 #define HASH_SIZE               1024
 #define VALUE_SIZE              1024
 #define MAX_PENDING_CONNECTIONS   10
+#define SIZE_OF_QUEUE           11
+
 
 // Definition of the operation type.
 typedef enum operation {
   PUT,
   GET
-} Operation; 
+} Operation;
 
 // Definition of the request.
 typedef struct request {
   Operation operation;
-  char key[KEY_SIZE];  
+  char key[KEY_SIZE];
   char value[VALUE_SIZE];
 } Request;
 
+//Each node of the Req_Queue consists of the descriptor and the conection start_time
+typedef struct node {
+  int fd;
+  struct timeval start_time;
+}Node;
+
 // Definition of the database.
 KISSDB *db = NULL;
+
+
+//Definition of global variables
+
+
+Node Req_Queue[SIZE_OF_QUEUE];
+//clean the memory of the Req_Queue
+memset(Req_Queue,0,sizeof(Node));
+
+//head and tail Initialized at the first position of the queue
+int head=0;
+int tail=0;
+//queue_mutex => to use with Req_Queue and head,tail
+static pthread_mutex_t queue_mutex=PTHREAD_MUTEX_INITIALIZER;
+
+struct timeval total_waiting_time;
+struct timeval total_service_time;
+int complete_requests;
+//time_mutex => to use with time counters and complete_requests
+static pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
+
+/*
+@check_tail_bounds- Checks if tail's position is out o bounds
+*/
+void check_tail_bounds(){
+    if(tail>(SIZE_OF_QUEUE-1)){
+      pthread_mutex_lock(&queue_mutex);
+      tail=0;
+      pthread_mutex_unlock(&queue_mutex);
+    }
+}
+/*
+@check_head_bounds- Checks if tail's position is out o bounds
+*/
+void check_head_bounds(){
+  if(head>(SIZE_OF_QUEUE-1)){
+    pthread_mutex_lock(&queue_mutex);
+    head=0;
+    pthread_mutex_unlock(&queue_mutex);
+  }
+}
+/*
+@put_queue- Producer uses this to put new requests in the queue
+*/
+void put_request(int fd){
+  pthread_mutex_lock(&queue_mutex);
+  Req_Queue[tail].fd=fd;
+  //Get the start time
+  gettimeofday(&Req_Queue[tail].start_time,NULL);
+  tail++;
+  check_tail_bounds();
+  pthread_mutex_unlock(&queue_mutex);
+}
+/*
+@get_request -Consumer Threads use this to get requests from queue
+--All Threads must start their excecution with this function
+--This function calls the process_request function
+*/
+void get_request(){
+  struct timeval waiting_time;
+  pthread_mutex_lock(&queue_mutex);
+  gettimeofday(&waiting_time,NULL);
+  pthread_mutex_lock(&time_mutex);
+  //Locking and calculating waiting time for the request
+  total_waiting_time.tv_sec=(waiting_time.tv_sec)-(Req_Queue[head].start_time.tv_sec);
+  total_waiting_time.tv_usec=(waiting_time.tv_usec)-(Req_Queue[head].start_time.utv_sec);
+  pthread_mutex_unlock(&time_mutex);
+  //Calling process_request
+  process_request(Req_Queue[head].fd);
+  head++;
+  check_head_bounds();
+  pthread_mutex_unlock(&queue_mutex);
+
+}
+
+/*
+@is_Full - Returns one if Req_Queue is full
+*/
+int is_Full(){
+  if((tail-head)==(SIZE_OF_QUEUE-1)){
+    return 1;
+    //Is full
+  }
+  return 0;
+}
+
+/*
+@is_Empty - Returns one if Req_Queue is empty
+*/
+int is_Empty(){
+  if(head==tail){
+    return 1;
+    //The queue is empty if head and tail point at the same position
+  }
+  return 0;
+
+}
 
 /**
  * @name parse_request - Parses a received message and generates a new request.
@@ -46,18 +152,18 @@ KISSDB *db = NULL;
 Request *parse_request(char *buffer) {
   char *token = NULL;
   Request *req = NULL;
-  
+
   // Check arguments.
   if (!buffer)
     return NULL;
-  
+
   // Prepare the request.
   req = (Request *) malloc(sizeof(Request));
   memset(req->key, 0, KEY_SIZE);
   memset(req->value, 0, VALUE_SIZE);
 
   // Extract the operation type.
-  token = strtok(buffer, ":");    
+  token = strtok(buffer, ":");
   if (!strcmp(token, "PUT")) {
     req->operation = PUT;
   } else if (!strcmp(token, "GET")) {
@@ -66,7 +172,7 @@ Request *parse_request(char *buffer) {
     free(req);
     return NULL;
   }
-  
+
   // Extract the key.
   token = strtok(NULL, ":");
   if (token) {
@@ -75,7 +181,7 @@ Request *parse_request(char *buffer) {
     free(req);
     return NULL;
   }
-  
+
   // Extract the value.
   token = strtok(NULL, ":");
   if (token) {
@@ -101,10 +207,10 @@ void process_request(const int socket_fd) {
     // Clean buffers.
     memset(response_str, 0, BUF_SIZE);
     memset(request_str, 0, BUF_SIZE);
-    
+
     // receive message.
     numbytes = read_str_from_socket(socket_fd, request_str, BUF_SIZE);
-    
+
     // parse the request.
     if (numbytes) {
       request = parse_request(request_str);
@@ -119,7 +225,7 @@ void process_request(const int socket_fd) {
             break;
           case PUT:
             // Write the given key/value pair to the database.
-            if (KISSDB_put(db, request->key, request->value)) 
+            if (KISSDB_put(db, request->key, request->value))
               sprintf(response_str, "PUT ERROR\n");
             else
               sprintf(response_str, "PUT OK\n");
@@ -161,17 +267,17 @@ int main() {
   // Ignore the SIGPIPE signal in order to not crash when a
   // client closes the connection unexpectedly.
   signal(SIGPIPE, SIG_IGN);
-  
+
   // create socket adress of server (type, IP-adress and port number)
   bzero(&server_addr, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = htonl(INADDR_ANY);    // any local interface
   server_addr.sin_port = htons(MY_PORT);
-  
+
   // bind socket to address
   if (bind(socket_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1)
     ERROR("bind()");
-  
+
   // start listening to socket for incomming connections
   listen(socket_fd, MAX_PENDING_CONNECTIONS);
   fprintf(stderr, "(Info) main: Listening for new connections on port %d ...\n", MY_PORT);
@@ -182,7 +288,7 @@ int main() {
     fprintf(stderr, "(Error) main: Cannot allocate memory for the database.\n");
     return 1;
   }
-  
+
   // Open the database.
   if (KISSDB_open(db, "mydb.db", KISSDB_OPEN_MODE_RWCREAT, HASH_SIZE, KEY_SIZE, VALUE_SIZE)) {
     fprintf(stderr, "(Error) main: Cannot open the database.\n");
@@ -190,18 +296,18 @@ int main() {
   }
 
   // main loop: wait for new connection/requests
-  while (1) { 
+  while (1) {
     // wait for incomming connection
     if ((new_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &clen)) == -1) {
       ERROR("accept()");
     }
-    
+
     // got connection, serve request
     fprintf(stderr, "(Info) main: Got connection from '%s'\n", inet_ntoa(client_addr.sin_addr));
-    
+
     process_request(new_fd);
     close(new_fd);
-  }  
+  }
 
   // Destroy the database.
   // Close the database.
@@ -212,6 +318,5 @@ int main() {
     free(db);
   db = NULL;
 
-  return 0; 
+  return 0;
 }
-
