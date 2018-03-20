@@ -118,7 +118,7 @@ int get_request(){
   int request_fd;
   pthread_mutex_lock(&queue_mutex);
   //Calling calculate_waiting_time
-  calculate_waiting_time(Req_Queue[head].start_time.tv_sec,Req_Queue[head].start_time.utv_sec);
+  calculate_waiting_time(Req_Queue[head].start_time.tv_sec,Req_Queue[head].start_time.tv_usec);
   request_fd=Req_Queue[head].fd;
   head++;
   check_head_bounds();
@@ -257,7 +257,7 @@ void process_request(const int socket_fd) {
 --Excecutes get_request and process_request
 --Pass NULL as argument
 */
-void * thread_start (*void argument){
+void * thread_start (void * argument){
   int req_fd;
   while(1){
     pthread_mutex_lock(&queue_mutex);
