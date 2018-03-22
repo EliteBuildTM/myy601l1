@@ -46,25 +46,24 @@ typedef struct node {
 // Definition of the database.
 KISSDB *db = NULL;
 
-
 //Definition of global variables
 Node Req_Queue[SIZE_OF_QUEUE];
 
 //head and tail Initialized at the first position of the queue
 int head=0;
 int tail=0;
+
 //Initialize conditions for the signals
-pthread_cond_t not_full=PTHREAD_COND_INITIALIZER;
-pthread_cond_t not_empty =PTHREAD_COND_INITIALIZER;
+pthread_cond_t not_full;
+pthread_cond_t not_empty;
 //queue_mutex => to use with Req_Queue,head,tail and signals conditions
-pthread_mutex_t queue_mutex=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t queue_mutex;
+//time_mutex => to use with time counters and complete_requests
+pthread_mutex_t time_mutex;
 
 struct timeval total_waiting_time;
 struct timeval total_service_time;
 int complete_requests;
-//time_mutex => to use with time counters and complete_requests
-pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
-
 
 
 /*
@@ -147,6 +146,7 @@ int is_Full(){
     return 1;
     //Is full
   }
+
   return 0;
 }
 
@@ -342,11 +342,20 @@ int main() {
     return 1;
   }
 
-  /*---------------------------------------------------------
-    ADD CODE FOR THREAD POOL HERE (EXW ARXISEI AMOLAW KAI GW)
+  pthread_attr_t attr = NULL;
 
-    --use thread_start for the function argument
-  ----------------------------------------------------------*/
+  if (pthread_cond_init(not_empty) != 0 ||
+		  pthread_cond_init(not_full) != 0 ||
+		  pthread_mutexattr_init(&attr) != 0 ||
+		  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0 ||
+		  pthread_mutex_init(time_mutex, &attr) != 0 ||
+		  pthread_mutex_init(time_mutex, &attr) != 0) {
+
+	  fprintf("(Error) main: Cannot initialize synchronization locks");
+	  return 1;
+  }
+
+  pthread_mutex_attr_destroy(&attr);
 
   // main loop: wait for new connection/requests
   while (1) {
