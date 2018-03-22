@@ -87,6 +87,9 @@ void check_head_bounds(){
     pthread_mutex_unlock(&queue_mutex);
   }
 }
+/*
+@calculate_waiting_time- Calculates the request's waiting time
+*/
 void calculate_waiting_time(long secs,long usecs){
   struct timeval waiting_time;
   pthread_mutex_lock(&time_mutex);
@@ -94,6 +97,17 @@ void calculate_waiting_time(long secs,long usecs){
   //Locking and calculating waiting time for the request
   total_waiting_time.tv_sec=(waiting_time.tv_sec)-(secs);
   total_waiting_time.tv_usec=(waiting_time.tv_usec)-(usecs);
+  pthread_mutex_unlock(&time_mutex);
+}
+/*
+@calculate_service_time- Calculates the request's service time
+*/
+void calculate_service_time(struct timeval end,struct timeval start){
+
+  //Locking and calculating waiting time for the request
+  pthread_mutex_lock(&time_mutex);
+  total_service_time.tv_sec=(end.tv_sec)-(start.tv_sec);
+  total_service_time.tv_usec=(end.tv_usec)-(start.tv_usec);
   pthread_mutex_unlock(&time_mutex);
 }
 
@@ -111,19 +125,18 @@ void put_request(int fd){
 }
 /*
 @get_request -Consumer Threads use this to get requests from queue
---All Threads must start their excecution with this function
---This function returns the socket_fd to process_request function
+--This function returns one Node of the queue
 */
-int get_request(){
-  int request_fd;
+Node get_request(){
+  Node request;
   pthread_mutex_lock(&queue_mutex);
   //Calling calculate_waiting_time
   calculate_waiting_time(Req_Queue[head].start_time.tv_sec,Req_Queue[head].start_time.tv_usec);
-  request_fd=Req_Queue[head].fd;
+  request=Req_Queue[head];
   head++;
   check_head_bounds();
   pthread_mutex_unlock(&queue_mutex);
-  return request_fd;
+  return request;
 }
 
 /*
@@ -259,19 +272,26 @@ void process_request(const int socket_fd) {
 */
 void * thread_start (void * argument){
   int req_fd;
+  struct timeval service_start,service_end;
+  Node request;
   while(1){
     pthread_mutex_lock(&queue_mutex);
     while(is_Empty()){
       //should check for return value of wait
       pthread_cond_wait(&not_empty,&queue_mutex);
     }
+    request=get_request();
     //gets the request's descriptor to call process_request
-    req_fd=get_request();
+    req_fd=request.fd;
     //Send this signal to the Producer thread in case it waits
     pthread_cond_signal(&not_full);
     pthread_mutex_unlock(&queue_mutex);
     //call process_request to serve the request
+    gettimeofday(&service_start,NULL);
     process_request(req_fd);
+    gettimeofday(&service_end,NULL);
+    //call calculate_service_time
+    calculate_service_time(service_end,service_start);
   }
 }
 /*
