@@ -1,11 +1,8 @@
 /* server.c
-
    Sample code of
    Assignment L1: Simple multi-threaded key-value server
    for the course MYY601 Operating Systems, University of Ioannina
-
    (c) S. Anastasiadis, G. Kappes 2016
-
 */
 
 
@@ -21,7 +18,8 @@
 #define HASH_SIZE               1024
 #define VALUE_SIZE              1024
 #define MAX_PENDING_CONNECTIONS   10
-#define SIZE_OF_QUEUE           11
+#define SIZE_OF_QUEUE             11
+#define THREAD_SIZE               10
 
 
 // Definition of the operation type.
@@ -46,26 +44,27 @@ typedef struct node {
 // Definition of the database.
 KISSDB *db = NULL;
 
-
 //Definition of global variables
 Node Req_Queue[SIZE_OF_QUEUE];
+
+//Define array of Threads
+pthread_t Threads [THREAD_SIZE];
 
 //head and tail Initialized at the first position of the queue
 int head=0;
 int tail=0;
+
 //Initialize conditions for the signals
-pthread_cond_t not_full=PTHREAD_COND_INITIALIZER;
-pthread_cond_t not_empty =PTHREAD_COND_INITIALIZER;
+pthread_cond_t not_full;
+pthread_cond_t not_empty;
 //queue_mutex => to use with Req_Queue,head,tail and signals conditions
-pthread_mutex_t queue_mutex=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t queue_mutex;
+//time_mutex => to use with time counters and complete_requests
+pthread_mutex_t time_mutex;
 
 struct timeval total_waiting_time;
 struct timeval total_service_time;
 int complete_requests;
-//time_mutex => to use with time counters and complete_requests
-pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
-
-
 
 /*
 @check_tail_bounds- Checks if tail's position is out o bounds
@@ -77,6 +76,7 @@ void check_tail_bounds(){
       pthread_mutex_unlock(&queue_mutex);
     }
 }
+
 /*
 @check_head_bounds- Checks if tail's position is out o bounds
 */
@@ -87,6 +87,7 @@ void check_head_bounds(){
     pthread_mutex_unlock(&queue_mutex);
   }
 }
+
 /*
 @calculate_waiting_time- Calculates the request's waiting time
 */
@@ -99,6 +100,7 @@ void calculate_waiting_time(long secs,long usecs){
   total_waiting_time.tv_usec=(waiting_time.tv_usec)-(usecs);
   pthread_mutex_unlock(&time_mutex);
 }
+
 /*
 @calculate_service_time- Calculates the request's service time
 */
@@ -123,6 +125,7 @@ void put_request(int fd){
   check_tail_bounds();
   pthread_mutex_unlock(&queue_mutex);
 }
+
 /*
 @get_request -Consumer Threads use this to get requests from queue
 --This function returns one Node of the queue
@@ -143,10 +146,11 @@ Node get_request(){
 @is_Full - Returns one if Req_Queue is full
 */
 int is_Full(){
-  if((tail-head)==(SIZE_OF_QUEUE-1)){
+  if((tail-head)==(SIZE_OF_QUEUE-1)||(head-tail)==1){
     return 1;
     //Is full
   }
+
   return 0;
 }
 
@@ -265,12 +269,13 @@ void process_request(const int socket_fd) {
     sprintf(response_str, "FORMAT ERROR\n");
     write_str_to_socket(socket_fd, response_str, strlen(response_str));
 }
+
 /*
 @ thread_start =>is the startup point for the Threads
 --Excecutes get_request and process_request
 --Pass NULL as argument
 */
-void * thread_start (void * argument){
+void *thread_start (void * argument){
   int req_fd;
   struct timeval service_start,service_end;
   Node request;
@@ -289,18 +294,20 @@ void * thread_start (void * argument){
     //call process_request to serve the request
     gettimeofday(&service_start,NULL);
     process_request(req_fd);
+    close(req_fd);
     gettimeofday(&service_end,NULL);
     //call calculate_service_time
     calculate_service_time(service_end,service_start);
   }
 }
+
 /*
  * @name main - The main routine.
  *
  * @return 0 on success, 1 on error.
  */
 int main() {
-
+  int i;
   int socket_fd,              // listen on this socket for new connections
       new_fd;                 // use this socket to service a new connection
   socklen_t clen;
@@ -342,11 +349,24 @@ int main() {
     return 1;
   }
 
-  /*---------------------------------------------------------
-    ADD CODE FOR THREAD POOL HERE (EXW ARXISEI AMOLAW KAI GW)
+  pthread_mutexattr_t attr;
 
-    --use thread_start for the function argument
-  ----------------------------------------------------------*/
+  if (pthread_cond_init(&not_empty,NULL) != 0 ||
+		  pthread_cond_init(&not_full,NULL) != 0 ||
+		  pthread_mutexattr_init(&attr) != 0 ||
+		  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0 ||
+		  pthread_mutex_init(&time_mutex, &attr) != 0 ||
+		  pthread_mutex_init(&time_mutex, &attr) != 0) {
+
+	  fprintf(stderr,"(Error) main: Cannot initialize synchronization locks");
+	  return 1;
+  }
+
+  pthread_mutexattr_destroy(&attr);
+
+  for(i=0;i<THREAD_SIZE;i++){
+    pthread_create(&Threads[i],NULL,thread_start,NULL);
+  }
 
   // main loop: wait for new connection/requests
   while (1) {
@@ -368,7 +388,6 @@ int main() {
     //send signal to the consumers that the queue is not empty
     //should check for the returning value of signal
     pthread_cond_signal(&not_empty);
-    close(new_fd);
     pthread_mutex_unlock(&queue_mutex);
   }
 
