@@ -105,7 +105,6 @@ void calculate_waiting_time(long secs,long usecs){
 @calculate_service_time- Calculates the request's service time
 */
 void calculate_service_time(struct timeval end,struct timeval start){
-
   //Locking and calculating waiting time for the request
   pthread_mutex_lock(&time_mutex);
   total_service_time.tv_sec=(end.tv_sec)-(start.tv_sec);
