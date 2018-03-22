@@ -65,7 +65,6 @@ struct timeval total_waiting_time;
 struct timeval total_service_time;
 int complete_requests;
 
-
 /*
 @check_tail_bounds- Checks if tail's position is out o bounds
 */
@@ -76,6 +75,7 @@ void check_tail_bounds(){
       pthread_mutex_unlock(&queue_mutex);
     }
 }
+
 /*
 @check_head_bounds- Checks if tail's position is out o bounds
 */
@@ -86,6 +86,7 @@ void check_head_bounds(){
     pthread_mutex_unlock(&queue_mutex);
   }
 }
+
 /*
 @calculate_waiting_time- Calculates the request's waiting time
 */
@@ -98,6 +99,7 @@ void calculate_waiting_time(long secs,long usecs){
   total_waiting_time.tv_usec=(waiting_time.tv_usec)-(usecs);
   pthread_mutex_unlock(&time_mutex);
 }
+
 /*
 @calculate_service_time- Calculates the request's service time
 */
@@ -122,6 +124,7 @@ void put_request(int fd){
   check_tail_bounds();
   pthread_mutex_unlock(&queue_mutex);
 }
+
 /*
 @get_request -Consumer Threads use this to get requests from queue
 --This function returns one Node of the queue
@@ -265,12 +268,13 @@ void process_request(const int socket_fd) {
     sprintf(response_str, "FORMAT ERROR\n");
     write_str_to_socket(socket_fd, response_str, strlen(response_str));
 }
+
 /*
 @ thread_start =>is the startup point for the Threads
 --Excecutes get_request and process_request
 --Pass NULL as argument
 */
-void * thread_start (void * argument){
+void *thread_start (void * argument){
   int req_fd;
   struct timeval service_start,service_end;
   Node request;
@@ -294,6 +298,7 @@ void * thread_start (void * argument){
     calculate_service_time(service_end,service_start);
   }
 }
+
 /*
  * @name main - The main routine.
  *
