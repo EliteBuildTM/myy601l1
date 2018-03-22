@@ -350,7 +350,7 @@ int main() {
 
   pthread_mutexattr_t attr;
 
-  if (pthread_cond_init(&not_empty,NULL) != 0 ||
+/*  if (pthread_cond_init(&not_empty,NULL) != 0 ||
 		  pthread_cond_init(&not_full,NULL) != 0 ||
 		  pthread_mutexattr_init(&attr) != 0 ||
 		  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0 ||
@@ -360,7 +360,7 @@ int main() {
 	  fprintf(stderr,"(Error) main: Cannot initialize synchronization locks");
 	  return 1;
   }
-
+*/
   pthread_mutexattr_destroy(&attr);
 
   for(i=0;i<THREAD_SIZE;i++){
