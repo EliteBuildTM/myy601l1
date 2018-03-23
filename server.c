@@ -348,6 +348,7 @@ int main() {
     return 1;
   }
 
+
   pthread_mutexattr_t attr;
 
 /*  if (pthread_cond_init(&not_empty,NULL) != 0 ||
