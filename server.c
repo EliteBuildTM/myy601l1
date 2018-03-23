@@ -39,7 +39,7 @@ typedef struct request {
 typedef struct node {
   int fd;
   struct timeval start_time;
-}Node;
+} Node;
 
 // Definition of the database.
 KISSDB *db = NULL;
@@ -67,78 +67,14 @@ struct timeval total_service_time;
 int complete_requests;
 
 /*
-@check_tail_bounds- Checks if tail's position is out o bounds
+@check_bounds- Checks if var's position is out o bounds
 */
-void check_tail_bounds(){
-    if(tail>(SIZE_OF_QUEUE-1)){
+void check_bounds(int *var){
+    if(*var>(SIZE_OF_QUEUE-1)){
       pthread_mutex_lock(&queue_mutex);
-      tail=0;
+      *var=0;
       pthread_mutex_unlock(&queue_mutex);
     }
-}
-
-/*
-@check_head_bounds- Checks if tail's position is out o bounds
-*/
-void check_head_bounds(){
-  if(head>(SIZE_OF_QUEUE-1)){
-    pthread_mutex_lock(&queue_mutex);
-    head=0;
-    pthread_mutex_unlock(&queue_mutex);
-  }
-}
-
-/*
-@calculate_waiting_time- Calculates the request's waiting time
-*/
-void calculate_waiting_time(long secs,long usecs){
-  struct timeval waiting_time;
-  pthread_mutex_lock(&time_mutex);
-  gettimeofday(&waiting_time,NULL);
-  //Locking and calculating waiting time for the request
-  total_waiting_time.tv_sec=(waiting_time.tv_sec)-(secs);
-  total_waiting_time.tv_usec=(waiting_time.tv_usec)-(usecs);
-  pthread_mutex_unlock(&time_mutex);
-}
-
-/*
-@calculate_service_time- Calculates the request's service time
-*/
-void calculate_service_time(struct timeval end,struct timeval start){
-  //Locking and calculating waiting time for the request
-  pthread_mutex_lock(&time_mutex);
-  total_service_time.tv_sec=(end.tv_sec)-(start.tv_sec);
-  total_service_time.tv_usec=(end.tv_usec)-(start.tv_usec);
-  pthread_mutex_unlock(&time_mutex);
-}
-
-/*
-@put_queue- Producer uses this to put new requests in the queue
-*/
-void put_request(int fd){
-  pthread_mutex_lock(&queue_mutex);
-  Req_Queue[tail].fd=fd;
-  //Get the start time
-  gettimeofday(&Req_Queue[tail].start_time,NULL);
-  tail++;
-  check_tail_bounds();
-  pthread_mutex_unlock(&queue_mutex);
-}
-
-/*
-@get_request -Consumer Threads use this to get requests from queue
---This function returns one Node of the queue
-*/
-Node get_request(){
-  Node request;
-  pthread_mutex_lock(&queue_mutex);
-  //Calling calculate_waiting_time
-  calculate_waiting_time(Req_Queue[head].start_time.tv_sec,Req_Queue[head].start_time.tv_usec);
-  request=Req_Queue[head];
-  head++;
-  check_head_bounds();
-  pthread_mutex_unlock(&queue_mutex);
-  return request;
 }
 
 /*
@@ -163,6 +99,54 @@ int is_Empty(){
   }
   return 0;
 
+}
+
+/*
+ * @calculate_time- Calculates the request's time.
+ *
+ * @param update_value: Pointer to total_waiting_time or to total_service_time
+ */
+void calculate_time(struct timeval *update_value, struct timeval start, struct timeval end){
+  struct timeval result;
+  timersub(&end, &start, &result);
+  pthread_mutex_lock(&time_mutex);
+  timeradd(update_value, &result, update_value);
+  pthread_mutex_unlock(&time_mutex);
+}
+
+/*
+@put_queue- Producer uses this to put new requests in the queue
+*/
+void put_request(int fd){
+  pthread_mutex_lock(&queue_mutex);
+
+  Req_Queue[tail].fd=fd;
+  gettimeofday(&Req_Queue[tail].start_time,NULL);
+  tail++;
+  check_bounds(&tail);
+
+  pthread_mutex_unlock(&queue_mutex);
+}
+
+/*
+@get_request -Consumer Threads use this to get requests from queue
+--This function returns one Node of the queue
+*/
+Node get_request(){
+  Node request;
+  struct timeval end;
+
+  pthread_mutex_lock(&queue_mutex);
+
+  gettimeofday(&end, NULL);
+  calculate_time(&total_waiting_time, Req_Queue[head].start_time, end); //bottleneck
+  request=Req_Queue[head];
+  head++;
+  check_bounds(&head);
+
+  pthread_mutex_unlock(&queue_mutex);
+
+  return request;
 }
 
 /**
@@ -278,25 +262,30 @@ void *thread_start (void * argument){
   int req_fd;
   struct timeval service_start,service_end;
   Node request;
+
   while(1){
     pthread_mutex_lock(&queue_mutex);
+
     while(is_Empty()){
-      //should check for return value of wait
       pthread_cond_wait(&not_empty,&queue_mutex);
+      /*nomizo th metablhth pou prepei na elegxoume sto if prepei na thn kanoume volatile*/
+      if(1) {
+    	  break;
+      }
     }
-    request=get_request();
-    //gets the request's descriptor to call process_request
-    req_fd=request.fd;
-    //Send this signal to the Producer thread in case it waits
-    pthread_cond_signal(&not_full);
-    pthread_mutex_unlock(&queue_mutex);
-    //call process_request to serve the request
+
     gettimeofday(&service_start,NULL);
+
+    request=get_request();
+    pthread_cond_signal(&not_full);
+    req_fd=request.fd;
     process_request(req_fd);
+
+    gettimeofday(&service_end, NULL);
+    pthread_mutex_unlock(&queue_mutex);
+
+    calculate_time(&total_waiting_time, service_start, service_end);
     close(req_fd);
-    gettimeofday(&service_end,NULL);
-    //call calculate_service_time
-    calculate_service_time(service_end,service_start);
   }
 }
 
@@ -351,43 +340,38 @@ int main() {
 
   pthread_mutexattr_t attr;
 
-/*  if (pthread_cond_init(&not_empty,NULL) != 0 ||
+  if (pthread_cond_init(&not_empty,NULL) != 0 ||
 		  pthread_cond_init(&not_full,NULL) != 0 ||
 		  pthread_mutexattr_init(&attr) != 0 ||
 		  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0 ||
 		  pthread_mutex_init(&time_mutex, &attr) != 0 ||
-		  pthread_mutex_init(&time_mutex, &attr) != 0) {
+		  pthread_mutex_init(&queue_mutex, &attr) != 0) {
 
 	  fprintf(stderr,"(Error) main: Cannot initialize synchronization locks");
 	  return 1;
   }
-*/
+
   pthread_mutexattr_destroy(&attr);
 
   for(i=0;i<THREAD_SIZE;i++){
     pthread_create(&Threads[i],NULL,thread_start,NULL);
   }
 
-  // main loop: wait for new connection/requests
   while (1) {
-    // wait for incomming connection
     if ((new_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &clen)) == -1) {
       ERROR("accept()");
     }
 
-    // got connection, serve request
     fprintf(stderr, "(Info) main: Got connection from '%s'\n", inet_ntoa(client_addr.sin_addr));
+
     pthread_mutex_lock(&queue_mutex);
+
     while(is_Full()){
-      //if the queue is Full with requests then it waits for the signal from the consumer
-      //should check for the returning value of wait
       pthread_cond_wait(&not_full,&queue_mutex);
     }
-    //adds a request in the queue
     put_request(new_fd);
-    //send signal to the consumers that the queue is not empty
-    //should check for the returning value of signal
     pthread_cond_signal(&not_empty);
+
     pthread_mutex_unlock(&queue_mutex);
   }
 
