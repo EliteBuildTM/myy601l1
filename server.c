@@ -1,11 +1,8 @@
 /* server.c
-
    Sample code of
    Assignment L1: Simple multi-threaded key-value server
    for the course MYY601 Operating Systems, University of Ioannina
-
    (c) S. Anastasiadis, G. Kappes 2016
-
 */
 
 
@@ -21,7 +18,8 @@
 #define HASH_SIZE               1024
 #define VALUE_SIZE              1024
 #define MAX_PENDING_CONNECTIONS   10
-#define SIZE_OF_QUEUE           11
+#define SIZE_OF_QUEUE             11
+#define THREAD_SIZE               10
 
 
 // Definition of the operation type.
@@ -48,6 +46,9 @@ KISSDB *db = NULL;
 
 //Definition of global variables
 Node Req_Queue[SIZE_OF_QUEUE];
+
+//Define array of Threads
+pthread_t Threads [THREAD_SIZE];
 
 //head and tail Initialized at the first position of the queue
 int head=0;
@@ -104,7 +105,6 @@ void calculate_waiting_time(long secs,long usecs){
 @calculate_service_time- Calculates the request's service time
 */
 void calculate_service_time(struct timeval end,struct timeval start){
-
   //Locking and calculating waiting time for the request
   pthread_mutex_lock(&time_mutex);
   total_service_time.tv_sec=(end.tv_sec)-(start.tv_sec);
@@ -145,7 +145,7 @@ Node get_request(){
 @is_Full - Returns one if Req_Queue is full
 */
 int is_Full(){
-  if((tail-head)==(SIZE_OF_QUEUE-1)){
+  if((tail-head)==(SIZE_OF_QUEUE-1)||(head-tail)==1){
     return 1;
     //Is full
   }
@@ -293,6 +293,7 @@ void *thread_start (void * argument){
     //call process_request to serve the request
     gettimeofday(&service_start,NULL);
     process_request(req_fd);
+    close(req_fd);
     gettimeofday(&service_end,NULL);
     //call calculate_service_time
     calculate_service_time(service_end,service_start);
@@ -305,7 +306,7 @@ void *thread_start (void * argument){
  * @return 0 on success, 1 on error.
  */
 int main() {
-
+  int i;
   int socket_fd,              // listen on this socket for new connections
       new_fd;                 // use this socket to service a new connection
   socklen_t clen;
@@ -347,20 +348,25 @@ int main() {
     return 1;
   }
 
-  pthread_attr_t attr = NULL;
 
-  if (pthread_cond_init(not_empty) != 0 ||
-		  pthread_cond_init(not_full) != 0 ||
+  pthread_mutexattr_t attr;
+
+/*  if (pthread_cond_init(&not_empty,NULL) != 0 ||
+		  pthread_cond_init(&not_full,NULL) != 0 ||
 		  pthread_mutexattr_init(&attr) != 0 ||
 		  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0 ||
-		  pthread_mutex_init(time_mutex, &attr) != 0 ||
-		  pthread_mutex_init(time_mutex, &attr) != 0) {
+		  pthread_mutex_init(&time_mutex, &attr) != 0 ||
+		  pthread_mutex_init(&time_mutex, &attr) != 0) {
 
-	  fprintf("(Error) main: Cannot initialize synchronization locks");
+	  fprintf(stderr,"(Error) main: Cannot initialize synchronization locks");
 	  return 1;
   }
+*/
+  pthread_mutexattr_destroy(&attr);
 
-  pthread_mutex_attr_destroy(&attr);
+  for(i=0;i<THREAD_SIZE;i++){
+    pthread_create(&Threads[i],NULL,thread_start,NULL);
+  }
 
   // main loop: wait for new connection/requests
   while (1) {
@@ -382,7 +388,6 @@ int main() {
     //send signal to the consumers that the queue is not empty
     //should check for the returning value of signal
     pthread_cond_signal(&not_empty);
-    close(new_fd);
     pthread_mutex_unlock(&queue_mutex);
   }
 
