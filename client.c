@@ -19,19 +19,20 @@
 #define GET_MODE           1
 #define PUT_MODE           2
 #define USER_MODE          3
-#define THREADS            10
+#define THREAD_SIZE      100
+
+char *host = NULL;
+char *request = NULL;
+int mode = 0;
+int option = 0;
+struct sockaddr_in server_addr;
+struct hostent *host_info;
+int count = ITER_COUNT;
 
 /**
  * @name print_usage - Prints usage information.
  * @return
  */
-void * start(void * args);
-
-typedef struct arguments{
-  int argc;
-  char ** argv;
-} Args;
-
 void print_usage() {
   fprintf(stderr, "Usage: client [OPTION]...\n\n");
   fprintf(stderr, "Available Options:\n");
@@ -84,42 +85,47 @@ void talk(const struct sockaddr_in server_addr, char *buffer) {
   close(socket_fd);
 }
 
-int main (int argc ,char ** argv){
-  int i;
-  pthread_t Threads[THREADS];
-  Args args;
-  args.argc=argc;
-  for(i=0;i<argc;i++){
-    args.argv[i]=argv[i];
+void *thread_start(void *args) {
+  int station, value, counter = count;
+  //we copy the value of count because every thread must have its own
+  char snd_buffer[BUF_SIZE];
+
+  if (mode == USER_MODE) {
+    memset(snd_buffer, 0, BUF_SIZE);
+    strncpy(snd_buffer, request, strlen(request));
+    printf("Operation: %s\n", snd_buffer);
+    talk(server_addr, snd_buffer);
+  } else {
+	  while(--counter>=0) {
+		  for (station = 0; station <= MAX_STATION_ID; station++) {
+			memset(snd_buffer, 0, BUF_SIZE);
+			if (mode == GET_MODE) {
+			  // Repeatedly GET.
+			  sprintf(snd_buffer, "GET:station.%d", station);
+			} else if (mode == PUT_MODE) {
+			  // Repeatedly PUT.
+			  // create a random value.
+			  value = rand() % 65 + (-20);
+			  sprintf(snd_buffer, "PUT:station.%d:%d", station, value);
+			}
+			printf("Operation: %s\n", snd_buffer);
+			talk(server_addr, snd_buffer);
+		  }
+	  }
   }
 
-
-  for (i=0;i<THREADS;i++){
-    pthread_create(&Threads[i],NULL,&start,&args);
-  }
-
-  for (i=0; i<THREADS;i++) {
-    pthread_join(Threads[i], NULL);
-  }
+  return NULL;
 }
 
 /**
  * @name main - The main routine.
  */
-void * start(void * args) {
-  Args * arguments=args;
-  char *host = NULL;
-  char *request = NULL;
-  int mode = 0;
-  int option = 0;
-  int count = ITER_COUNT;
-  char snd_buffer[BUF_SIZE];
-  int station, value;
-  struct sockaddr_in server_addr;
-  struct hostent *host_info;
+int main(int argc, char **argv) {
 
+  int i;
+  pthread_t Threads[100];
   // Parse user parameters.
-  while ((option = getopt(arguments->argc, arguments->argv,"i:hgpo:a:")) != -1) {
+  while ((option = getopt(argc, argv,"i:hgpo:a:")) != -1) {
     switch (option) {
       case 'h':
         print_usage();
@@ -129,7 +135,7 @@ void * start(void * args) {
         break;
       case 'i':
         count = atoi(optarg);
-	       break;
+        break;
       case 'g':
         if (mode) {
           fprintf(stderr, "You can only specify one of the following: -g, -p, -o\n");
@@ -181,27 +187,12 @@ void * start(void * args) {
   server_addr.sin_addr = *((struct in_addr*)host_info->h_addr);
   server_addr.sin_port = htons(SERVER_PORT);
 
-  if (mode == USER_MODE) {
-    memset(snd_buffer, 0, BUF_SIZE);
-    strncpy(snd_buffer, request, strlen(request));
-    printf("Operation: %s\n", snd_buffer);
-    talk(server_addr, snd_buffer);
-  } else {
-    while(--count>=0) {
-      for (station = 0; station <= MAX_STATION_ID; station++) {
-        memset(snd_buffer, 0, BUF_SIZE);
-        if (mode == GET_MODE) {
-          // Repeatedly GET.
-          sprintf(snd_buffer, "GET:station.%d", station);
-        } else if (mode == PUT_MODE) {
-          // Repeatedly PUT.
-          // create a random value.
-          value = rand() % 65 + (-20);
-          sprintf(snd_buffer, "PUT:station.%d:%d", station, value);
-        }
-        printf("Operation: %s\n", snd_buffer);
-        talk(server_addr, snd_buffer);
-      }
-    }
+  for (i=0; i<THREAD_SIZE; i++) {
+	  pthread_create(&Threads[i], NULL, thread_start, NULL);
+  }
+
+  for (i=0; i<THREAD_SIZE; i++) {
+	  pthread_join(Threads[i], NULL);
   }
 }
+
