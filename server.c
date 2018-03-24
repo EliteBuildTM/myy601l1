@@ -118,16 +118,16 @@ void TSTP_handler(){
   for (i=0; i<THREAD_SIZE;i++) {
     pthread_join(Threads[i], NULL);
   }
-  avg_waiting_time_secs=total_waiting_time/complete_requests;
-  avg_waiting_time_usecs=total_waiting_time/complete_requests;
-  avg_service_time_secs=total_service_time/complete_requests;
-  avg_service_time_secs=total_service_time/complete_requests;
+  avg_waiting_time_secs=total_waiting_time.tv_sec/complete_requests;
+  avg_waiting_time_usecs=total_waiting_time.tv_usec/complete_requests;
+  avg_service_time_secs=total_service_time.tv_sec/complete_requests;
+  avg_service_time_usecs=total_service_time.tv_usec/complete_requests;
 
   printf("NUMBER OF COMPLETED REQUESTS : %d\n",complete_requests );
   printf("AVARAGE WAITING TIME : %ld,%ld\n",avg_waiting_time_secs,avg_waiting_time_usecs);
   printf("AVARAGE SERVICE TIME : %ld,%ld\n",avg_service_time_secs,avg_service_time_usecs );
 
-  printf("Terminating.....\n", );
+  printf("Terminating.....\n");
   sleep(2);
   exit(1);
 
