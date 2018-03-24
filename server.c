@@ -46,7 +46,7 @@ KISSDB *db = NULL;
 
 //Definition of global variables
 Node Req_Queue[SIZE_OF_QUEUE];
-
+volatile int while_braker=0;
 //Define array of Threads
 pthread_t Threads [THREAD_SIZE];
 
@@ -64,7 +64,7 @@ pthread_mutex_t time_mutex;
 
 struct timeval total_waiting_time;
 struct timeval total_service_time;
-int complete_requests;
+int complete_requests=0;
 
 /*
 @check_bounds- Checks if var's position is out o bounds
@@ -98,6 +98,38 @@ int is_Empty(){
     //The queue is empty if head and tail point at the same position
   }
   return 0;
+
+}
+
+/*@TSTP_handler->Ctrl+Z handler
+-Joins all threads
+-Calculates and prints avarage waiting and service time
+-Exits the server process
+*/
+void TSTP_handler(){
+  int i;
+  long avg_waiting_time_secs,avg_service_time_secs;
+  long avg_waiting_time_usecs,avg_service_time_usecs;
+  while_braker=1;
+  pthread_mutex_lock(&queue_mutex);
+  pthread_cond_broadcast(&not_empty);
+  pthread_mutex_unlock(&queue_mutex);
+
+  for (i=0; i<THREAD_SIZE;i++) {
+    pthread_join(Threads[i], NULL);
+  }
+  avg_waiting_time_secs=total_waiting_time/complete_requests;
+  avg_waiting_time_usecs=total_waiting_time/complete_requests;
+  avg_service_time_secs=total_service_time/complete_requests;
+  avg_service_time_secs=total_service_time/complete_requests;
+
+  printf("NUMBER OF COMPLETED REQUESTS : %d\n",complete_requests );
+  printf("AVARAGE WAITING TIME : %ld,%ld\n",avg_waiting_time_secs,avg_waiting_time_usecs);
+  printf("AVARAGE SERVICE TIME : %ld,%ld\n",avg_service_time_secs,avg_service_time_usecs );
+
+  printf("Terminating.....\n", );
+  sleep(2);
+  exit(1);
 
 }
 
@@ -269,7 +301,7 @@ void *thread_start (void * argument){
     while(is_Empty()){
       pthread_cond_wait(&not_empty,&queue_mutex);
       /*nomizo th metablhth pou prepei na elegxoume sto if prepei na thn kanoume volatile*/
-      if(1) {
+      if(while_braker) {
     	  break;
       }
     }
@@ -285,6 +317,10 @@ void *thread_start (void * argument){
     pthread_mutex_unlock(&queue_mutex);
 
     calculate_time(&total_waiting_time, service_start, service_end);
+
+    pthread_mutex_lock(&time_mutex);
+    complete_requests++;
+    pthread_mutex_unlock(&time_mutex);
     close(req_fd);
   }
 }
@@ -301,7 +337,7 @@ int main() {
   socklen_t clen;
   struct sockaddr_in server_addr,  // my address information
                      client_addr;  // connector's address information
-
+  signal(SIGTSTP,TSTP_handler);   //signal handler for Ctrl+Z
   // create socket
   if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     ERROR("socket()");
