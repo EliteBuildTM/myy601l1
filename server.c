@@ -18,8 +18,8 @@
 #define HASH_SIZE               1024
 #define VALUE_SIZE              1024
 #define MAX_PENDING_CONNECTIONS   10
-#define SIZE_OF_QUEUE             11
-#define THREAD_SIZE               10
+#define SIZE_OF_QUEUE            200
+#define THREAD_SIZE               20
 
 
 // Definition of the operation type.
@@ -46,7 +46,7 @@ KISSDB *db = NULL;
 
 //Definition of global variables
 Node Req_Queue[SIZE_OF_QUEUE];
-volatile int while_braker=0;
+int while_braker=0;
 //Define array of Threads
 pthread_t Threads [THREAD_SIZE];
 
@@ -61,6 +61,7 @@ pthread_cond_t not_empty;
 pthread_mutex_t queue_mutex;
 //time_mutex => to use with time counters and complete_requests
 pthread_mutex_t time_mutex;
+pthread_mutex_t while_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct timeval total_waiting_time;
 struct timeval total_service_time;
@@ -98,38 +99,6 @@ int is_Empty(){
     //The queue is empty if head and tail point at the same position
   }
   return 0;
-
-}
-
-/*@TSTP_handler->Ctrl+Z handler
--Joins all threads
--Calculates and prints avarage waiting and service time
--Exits the server process
-*/
-void TSTP_handler(){
-  int i;
-  long avg_waiting_time_secs,avg_service_time_secs;
-  long avg_waiting_time_usecs,avg_service_time_usecs;
-  while_braker=1;
-  pthread_mutex_lock(&queue_mutex);
-  pthread_cond_broadcast(&not_empty);
-  pthread_mutex_unlock(&queue_mutex);
-
-  for (i=0; i<THREAD_SIZE;i++) {
-    pthread_join(Threads[i], NULL);
-  }
-  avg_waiting_time_secs=total_waiting_time.tv_sec/complete_requests;
-  avg_waiting_time_usecs=total_waiting_time.tv_usec/complete_requests;
-  avg_service_time_secs=total_service_time.tv_sec/complete_requests;
-  avg_service_time_usecs=total_service_time.tv_usec/complete_requests;
-
-  printf("NUMBER OF COMPLETED REQUESTS : %d\n",complete_requests );
-  printf("AVARAGE WAITING TIME : %ld,%ld\n",avg_waiting_time_secs,avg_waiting_time_usecs);
-  printf("AVARAGE SERVICE TIME : %ld,%ld\n",avg_service_time_secs,avg_service_time_usecs );
-
-  printf("Terminating.....\n");
-  sleep(2);
-  exit(1);
 
 }
 
@@ -285,24 +254,63 @@ void process_request(const int socket_fd) {
     write_str_to_socket(socket_fd, response_str, strlen(response_str));
 }
 
+/*@TSTP_handler->Ctrl+Z handler
+-Joins all threads
+-Calculates and prints avarage waiting and service time
+-Exits the server process
+*/
+void TSTP_handler(){
+  int i;
+  long avg_waiting_time_secs,avg_service_time_secs;
+  long avg_waiting_time_usecs,avg_service_time_usecs;
+
+  pthread_mutex_lock(&while_mutex);
+  while_braker=1;
+  pthread_mutex_unlock(&while_mutex);
+  pthread_mutex_lock(&queue_mutex);
+  pthread_cond_broadcast(&not_empty);
+  pthread_mutex_unlock(&queue_mutex);
+
+  for (i=0; i<THREAD_SIZE;i++) {
+    pthread_join(Threads[i], NULL);
+  }
+
+  avg_waiting_time_secs=total_waiting_time.tv_sec/complete_requests;
+  avg_waiting_time_usecs=total_waiting_time.tv_usec/complete_requests;
+  avg_service_time_secs=total_service_time.tv_sec/complete_requests;
+  avg_service_time_usecs=total_service_time.tv_usec/complete_requests;
+
+  printf("NUMBER OF COMPLETED REQUESTS : %d\n",complete_requests );
+  printf("AVARAGE WAITING TIME : %ld,%ld\n",avg_waiting_time_secs,avg_waiting_time_usecs);
+  printf("AVARAGE SERVICE TIME : %ld,%ld\n",avg_service_time_secs,avg_service_time_usecs );
+
+  printf("Terminating.....\n");
+  sleep(2);
+  exit(1);
+}
+
 /*
 @ thread_start =>is the startup point for the Threads
 --Excecutes get_request and process_request
 --Pass NULL as argument
 */
 void *thread_start (void * argument){
-  int req_fd;
+  int req_fd, i=1;
   struct timeval service_start,service_end;
   Node request;
 
-  while(1){
+  while(i){
     pthread_mutex_lock(&queue_mutex);
 
     while(is_Empty()){
+	  if(while_braker) {
+    	  pthread_mutex_unlock(&queue_mutex);
+		  return NULL;
+	  }
       pthread_cond_wait(&not_empty,&queue_mutex);
-      /*nomizo th metablhth pou prepei na elegxoume sto if prepei na thn kanoume volatile*/
       if(while_braker) {
-    	  break;
+    	  pthread_mutex_unlock(&queue_mutex);
+    	  return NULL;
       }
     }
 
@@ -323,6 +331,8 @@ void *thread_start (void * argument){
     pthread_mutex_unlock(&time_mutex);
     close(req_fd);
   }
+
+  return NULL;
 }
 
 /*

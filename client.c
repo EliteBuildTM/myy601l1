@@ -7,7 +7,7 @@
    (c) S. Anastasiadis, G. Kappes 2016
 
 */
-
+// Example run ./client -a localhost -i 1 -p
 
 #include "utils.h"
 
@@ -21,13 +21,12 @@
 #define USER_MODE          3
 #define THREAD_SIZE      100
 
-char *host = NULL;
-char *request = NULL;
-int mode = 0;
-int option = 0;
+char *host;
+char *request;
+int count = ITER_COUNT;
+int mode;
 struct sockaddr_in server_addr;
 struct hostent *host_info;
-int count = ITER_COUNT;
 
 /**
  * @name print_usage - Prints usage information.
@@ -120,11 +119,15 @@ void *thread_start(void *args) {
 /**
  * @name main - The main routine.
  */
-int main(int argc, char **argv) {
+int main(int argc, char *argv[]) {
 
-  int i;
+  int i, option;
   pthread_t Threads[100];
+
   // Parse user parameters.
+  // : means that the option is required to have a value. this value
+  // is located in the optarg
+
   while ((option = getopt(argc, argv,"i:hgpo:a:")) != -1) {
     switch (option) {
       case 'h':
@@ -170,6 +173,7 @@ int main(int argc, char **argv) {
     print_usage();
     exit(0);
   }
+
   if (!host) {
     fprintf(stderr, "Error: -a <address> is required.\n\n");
     print_usage();
@@ -181,7 +185,7 @@ int main(int argc, char **argv) {
     ERROR("gethostbyname()");
   }
 
-  // create socket adress of server (type, IP-adress and port number)
+  // create socket address of server (type, IP-address and port number)
   bzero(&server_addr, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr = *((struct in_addr*)host_info->h_addr);
