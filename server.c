@@ -281,8 +281,8 @@ void TSTP_handler(){
   avg_service_time_usecs=total_service_time.tv_usec/complete_requests;
 
   printf("NUMBER OF COMPLETED REQUESTS : %d\n",complete_requests );
-  printf("AVARAGE WAITING TIME : %ld,%ld\n",avg_waiting_time_secs,avg_waiting_time_usecs);
-  printf("AVARAGE SERVICE TIME : %ld,%ld\n",avg_service_time_secs,avg_service_time_usecs );
+  printf("AVERAGE WAITING TIME : %ld,%ld seconds\n",avg_waiting_time_secs,avg_waiting_time_usecs);
+  printf("AVERAGE SERVICE TIME : %ld,%ld seconds\n",avg_service_time_secs,avg_service_time_usecs );
 
   printf("Terminating.....\n");
   sleep(2);
@@ -295,11 +295,11 @@ void TSTP_handler(){
 --Pass NULL as argument
 */
 void *thread_start (void * argument){
-  int req_fd, i=1;
+  int req_fd;
   struct timeval service_start,service_end;
   Node request;
 
-  while(i){
+  while(1){
     pthread_mutex_lock(&queue_mutex);
 
     while(is_Empty()){
@@ -324,7 +324,7 @@ void *thread_start (void * argument){
     gettimeofday(&service_end, NULL);
     pthread_mutex_unlock(&queue_mutex);
 
-    calculate_time(&total_waiting_time, service_start, service_end);
+    calculate_time(&total_service_time, service_start, service_end);
 
     pthread_mutex_lock(&time_mutex);
     complete_requests++;
