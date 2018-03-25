@@ -342,12 +342,15 @@ void *thread_start (void * argument){
  */
 int main() {
   int i;
+  pid_t server_pid;
   int socket_fd,              // listen on this socket for new connections
       new_fd;                 // use this socket to service a new connection
   socklen_t clen;
+  server_pid=getpid();
   struct sockaddr_in server_addr,  // my address information
                      client_addr;  // connector's address information
   signal(SIGTSTP,TSTP_handler);   //signal handler for Ctrl+Z
+  printf("Server's pid %d\n",server_pid);//to use kill function
   // create socket
   if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     ERROR("socket()");
