@@ -62,6 +62,11 @@ pthread_mutex_t queue_mutex;
 //time_mutex => to use with time counters and complete_requests
 pthread_mutex_t time_mutex;
 pthread_mutex_t while_mutex = PTHREAD_MUTEX_INITIALIZER;
+//Mutex and conditions for the readers and writers
+pthread_mutex_t read_write_mutex;
+pthread_cond_t reader_inQueue;
+pthread_cond_t writer_inQueue;
+int readers=0,writers=0;
 
 struct timeval total_waiting_time;
 struct timeval total_service_time;
@@ -224,18 +229,42 @@ void process_request(const int socket_fd) {
       if (request) {
         switch (request->operation) {
           case GET:
+          pthread_mutex_lock(&read_write_mutex);
+            while(writers>0){
+              pthread_cond_wait(&writer_inQueue,&read_write_mutex);
+            }
+            readers++;
+            pthread_mutex_unlock(&read_write_mutex);
             // Read the given key from the database.
             if (KISSDB_get(db, request->key, request->value))
               sprintf(response_str, "GET ERROR\n");
             else
               sprintf(response_str, "GET OK: %s\n", request->value);
+            readers--;
+            if(readers==0){
+              pthread_mutex_lock(&read_write_mutex);
+              pthread_cond_signal(&reader_inQueue);
+              pthread_mutex_unlock(&read_write_mutex);
+            }
             break;
           case PUT:
             // Write the given key/value pair to the database.
+            pthread_mutex_lock(&read_write_mutex);
+            while(readers>0){
+              pthread_cond_wait(&reader_inQueue,&read_write_mutex);
+            }
+            writers++;
+            pthread_mutex_unlock(&read_write_mutex);
             if (KISSDB_put(db, request->key, request->value))
               sprintf(response_str, "PUT ERROR\n");
             else
               sprintf(response_str, "PUT OK\n");
+            writers--;
+            if(writers==0){
+              pthread_mutex_lock(&read_write_mutex);
+              pthread_cond_signal(&writer_inQueue);
+              pthread_mutex_unlock(&read_write_mutex);
+            }
             break;
           default:
             // Unsupported operation.
@@ -391,9 +420,12 @@ int main() {
 
   if (pthread_cond_init(&not_empty,NULL) != 0 ||
 		  pthread_cond_init(&not_full,NULL) != 0 ||
+      pthread_cond_init(&writer_inQueue,NULL) != 0 ||
+      pthread_cond_init(&reader_inQueue,NULL) != 0 ||
 		  pthread_mutexattr_init(&attr) != 0 ||
 		  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0 ||
 		  pthread_mutex_init(&time_mutex, &attr) != 0 ||
+      pthread_mutex_init(&read_write_mutex, &attr) != 0 ||
 		  pthread_mutex_init(&queue_mutex, &attr) != 0) {
 
 	  fprintf(stderr,"(Error) main: Cannot initialize synchronization locks");
