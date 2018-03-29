@@ -46,7 +46,7 @@ KISSDB *db = NULL;
 
 //Definition of global variables
 Node Req_Queue[SIZE_OF_QUEUE];
-int while_braker=0;
+int while_breaker=0;
 //Define array of Threads
 pthread_t Threads [THREAD_SIZE];
 
@@ -294,8 +294,9 @@ void TSTP_handler(){
   long avg_waiting_time_usecs,avg_service_time_usecs;
 
   pthread_mutex_lock(&while_mutex);
-  while_braker=1;
+  while_breaker=1;
   pthread_mutex_unlock(&while_mutex);
+
   pthread_mutex_lock(&queue_mutex);
   pthread_cond_broadcast(&not_empty);
   pthread_mutex_unlock(&queue_mutex);
@@ -332,12 +333,12 @@ void *thread_start (void * argument){
     pthread_mutex_lock(&queue_mutex);
 
     while(is_Empty()){
-	  if(while_braker) {
+	  if(while_breaker) {
     	  pthread_mutex_unlock(&queue_mutex);
 		  return NULL;
 	  }
       pthread_cond_wait(&not_empty,&queue_mutex);
-      if(while_braker) {
+      if(while_breaker) {
     	  pthread_mutex_unlock(&queue_mutex);
     	  return NULL;
       }
